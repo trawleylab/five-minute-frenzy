@@ -55,8 +55,10 @@ self.addEventListener("fetch", (event) => {
     /(?:^|\/)(index\.html|app\.js|logic\.js|version\.js|styles\.css|manifest\.webmanifest)$/.test(url.pathname);
 
   if (isShell) {
+    // no-cache = always revalidate with GitHub Pages (its max-age is 10 min),
+    // so a deploy reaches the iPad on the very next online launch
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: "no-cache" })
         .then((res) => putInCache(req, res))
         .catch(() =>
           caches.match(req).then((cached) => {

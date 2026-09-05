@@ -22,18 +22,22 @@ Every top/side pair appears exactly once per sheet, just like the paper.
 
 1. Tap a sheet → 3 · 2 · 1 · Go! The clock starts and the first square glows.
 2. Type the answer on the big keypad. A square moves on **by itself** the
-   moment what you've typed can't be the start of a longer answer (2–9
-   commit instantly; 1 waits for a second digit or ➜). ⌫ steps back.
+   moment what you've typed is a possible answer that can't grow into a
+   longer one (2–9 commit instantly on the classic sheet; 1 waits for a
+   second digit or ➜). ⌫ removes the last digit you typed, even if the
+   square has already moved on — so a slip is one tap away.
 3. Tap any square to jump to it; ➜ skips a square (it comes round again at
    the end). Physical keyboard works too: digits, Backspace, Enter/Tab/Space
    for next, arrows to move.
-4. Tap **Finish** (it lights up when every square is filled) or wait for the
-   buzzer. Marking happens at the end, like the paper: green = right, red =
-   wrong with the right answer underneath, grey = blank.
+4. Tap **Finish** (it lights up when every square is filled; ➜ finishes too
+   once the sheet is full) or wait for the buzzer. Marking happens at the
+   end, like the paper: green = right, red = wrong with the right answer
+   underneath, grey = blank.
 
-Scores go into a history with a best per sheet. A round in progress survives
-the iPad killing the app: the deadline is wall-clock, so relaunching picks it
-up with the right time left (or marks it, if the clock ran out).
+Scores go into a history with a best per sheet (reaching the goal beats any
+score that didn't). A round in progress survives the iPad killing the app:
+the deadline is wall-clock, so relaunching picks it up with the right time
+left. If the clock ran out while the app was closed, the round isn't counted.
 
 ## Install on iPad
 

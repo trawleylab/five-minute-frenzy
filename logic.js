@@ -78,11 +78,14 @@
 
   function maxDigits(answers) { return answers.reduce((m, a) => Math.max(m, String(a).length), 1); }
 
-  // After a digit is typed, should the cell commit and move on?
-  // Yes when the entry is as long as any answer can be, or when no possible
-  // answer starts with what's typed AND is longer (waiting couldn't help).
+  // After a digit is typed, should the square commit and move on?
+  // Yes when the entry is as long as any answer can be, or when it IS a
+  // possible answer and no longer answer starts with it (waiting can't help).
+  // A stray digit that can't be any answer waits, so a slip can be ⌫'d.
   function shouldCommit(typed, answers, maxLen) {
     if (typed.length >= maxLen) return true;
+    const n = Number(typed);
+    if (String(n) !== typed || answers.indexOf(n) === -1) return false;
     return !answers.some((a) => { const s = String(a); return s.length > typed.length && s.indexOf(typed) === 0; });
   }
 
@@ -118,9 +121,15 @@
     return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
   }
 
-  // Is result a better than result b? More correct wins; ties go to the faster time.
+  // The sheet's own goal: 98 or better, and the clock didn't beat you.
+  function isGoal(h) { return !!h && h.correct >= GOAL && !h.timedOut; }
+
+  // Is result a better than result b? Reaching the goal beats not reaching it;
+  // then more correct wins; ties go to the faster time.
   function betterThan(a, b) {
     if (!b) return true;
+    const ga = isGoal(a), gb = isGoal(b);
+    if (ga !== gb) return ga;
     if (a.correct !== b.correct) return a.correct > b.correct;
     return a.ms < b.ms;
   }
@@ -128,7 +137,7 @@
   const api = {
     LEVELS, ROUND_MS, GOAL,
     levelById, shuffle, makeRound, answerAt, possibleAnswers, maxDigits,
-    shouldCommit, nextEmpty, score, fmtTime, betterThan,
+    shouldCommit, nextEmpty, score, fmtTime, betterThan, isGoal,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.Frenzy = api;

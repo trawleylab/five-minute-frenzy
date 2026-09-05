@@ -70,8 +70,10 @@ test("auto-advance: commit when nothing longer is possible", () => {
   const big = F.possibleAnswers(F.levelById("addbig"));
   assert.strictEqual(F.shouldCommit("1", big, 2), false);
   assert.strictEqual(F.shouldCommit("2", big, 2), false);
-  assert.strictEqual(F.shouldCommit("3", big, 2), true, "nothing starts with 3 — commit (it's wrong, but waiting can't help)");
-  assert.strictEqual(F.shouldCommit("0", big, 2), true);
+  assert.strictEqual(F.shouldCommit("3", big, 2), false, "3 can't be any answer here: a slip, so wait for ⌫ rather than commit a wrong square");
+  assert.strictEqual(F.shouldCommit("0", big, 2), false);
+  assert.strictEqual(F.shouldCommit("35", big, 2), true, "two digits is as long as it gets — commit even if wrong");
+  assert.strictEqual(F.shouldCommit("05", add, 2), true);
 });
 
 test("nextEmpty skips filled squares and wraps; -1 when full", () => {
@@ -103,8 +105,12 @@ test("time formatting: countdown ceils, elapsed floors", () => {
   assert.strictEqual(F.fmtTime(65_000), "1:05");
 });
 
-test("betterThan: more right wins, then faster", () => {
+test("betterThan: goal first, then more right, then faster", () => {
   assert.strictEqual(F.betterThan({ correct: 90, ms: 300000 }, null), true);
+  assert.strictEqual(F.isGoal({ correct: 98, ms: 250000, timedOut: false }), true);
+  assert.strictEqual(F.isGoal({ correct: 99, ms: 300000, timedOut: true }), false);
+  assert.strictEqual(F.betterThan({ correct: 98, ms: 280000, timedOut: false }, { correct: 99, ms: 300000, timedOut: true }), true, "reaching the goal beats a higher timed-out score");
+  assert.strictEqual(F.betterThan({ correct: 99, ms: 300000, timedOut: true }, { correct: 98, ms: 280000, timedOut: false }), false);
   assert.strictEqual(F.betterThan({ correct: 91, ms: 300000 }, { correct: 90, ms: 100000 }), true);
   assert.strictEqual(F.betterThan({ correct: 90, ms: 200000 }, { correct: 90, ms: 250000 }), true);
   assert.strictEqual(F.betterThan({ correct: 90, ms: 250000 }, { correct: 90, ms: 250000 }), false);

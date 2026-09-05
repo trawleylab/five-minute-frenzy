@@ -13,15 +13,20 @@ const fxLayer = document.getElementById("fx-layer");
 /* ---------- persistence ---------- */
 const STORE_KEY = "frenzy.v1";
 const ROUND_KEY = "frenzy.round";
-const HISTORY_MAX = 300;
+const HISTORY_MAX = 1000;
 
+function validEntry(h) {
+  return !!h && typeof h === "object" && typeof h.level === "string" && typeof h.when === "string" &&
+    Number.isInteger(h.correct) && Number.isInteger(h.wrong) && Number.isInteger(h.blank) &&
+    typeof h.ms === "number" && Number.isFinite(h.ms);
+}
 function loadStore() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
       if (s && typeof s === "object") {
-        return { muted: !!s.muted, history: Array.isArray(s.history) ? s.history : [] };
+        return { muted: !!s.muted, history: Array.isArray(s.history) ? s.history.filter(validEntry) : [] };
       }
     }
   } catch (e) { /* ignore */ }
@@ -37,6 +42,14 @@ function bestFor(levelId) {
   let best = null;
   for (const h of historyFor(levelId)) if (F.betterThan(h, best)) best = h;
   return best;
+}
+// Trim old rounds but never lose a sheet's best.
+function trimHistory() {
+  if (store.history.length <= HISTORY_MAX) return;
+  const bests = F.LEVELS.map((l) => bestFor(l.id)).filter(Boolean);
+  const keep = store.history.slice(-HISTORY_MAX);
+  for (const b of bests) if (keep.indexOf(b) === -1) keep.unshift(b);
+  store.history = keep;
 }
 
 /* ---------- sound (WebAudio, synthesised — no assets) ---------- */
@@ -126,15 +139,17 @@ function burst() {
 
 /* ---------- confirm popover ---------- */
 let modal = null;
-function confirmBox(title, sub, okLabel, onOk, cancelLabel = "Keep going") {
+// { title, sub, ok, cancel, danger } — a "danger" box makes Keep going the big
+// orange button so an accidental tap lands on the safe choice.
+function confirmBox(opts, onOk) {
   closeConfirm();
   const bd = el("div", "confirm-backdrop");
   const box = el("div", "confirm");
-  box.append(el("div", "c-title", title), el("div", "c-sub", sub));
+  box.append(el("div", "c-title", opts.title), el("div", "c-sub", opts.sub));
   const row = el("div", "c-row");
   row.append(
-    btn("big-btn", cancelLabel, () => { sfx.tap(); closeConfirm(); }),
-    btn("big-btn primary", okLabel, () => { sfx.tap(); closeConfirm(); onOk(); })
+    btn("big-btn" + (opts.danger ? " primary" : ""), opts.cancel || "Keep going", () => { sfx.tap(); closeConfirm(); }),
+    btn("big-btn" + (opts.danger ? " danger" : " primary"), opts.ok, () => { sfx.tap(); closeConfirm(); onOk(); })
   );
   box.appendChild(row);
   bd.appendChild(box);
@@ -197,11 +212,11 @@ function renderHistory() {
     for (const l of F.LEVELS) bests[l.id] = bestFor(l.id);
     const list = el("div", "hist-list");
     store.history.slice().reverse().forEach((h) => {
-      const lvl = F.levelById(h.level);
-      const goal = h.correct >= F.GOAL && !h.timedOut;
+      const lvl = F.LEVELS.find((l) => l.id === h.level);
+      const goal = F.isGoal(h);
       const row = el("div", "hist-row" + (bests[h.level] === h ? " best" : "") + (goal ? " goal" : ""));
       row.append(
-        el("span", "h-level", `${lvl.emoji} ${lvl.name}`),
+        el("span", "h-level", lvl ? `${lvl.emoji} ${lvl.name}` : "Old sheet"),
         el("span", "h-score", `${h.correct}/100`),
         el("span", "h-time", h.timedOut ? "⏰ 5:00" : F.fmtTime(h.ms)),
         el("span", "h-when", fmtWhen(h.when))
@@ -212,11 +227,11 @@ function renderHistory() {
     page.appendChild(el("p", "hist-key", "⭐ best for that level · green = 98+ in under five minutes"));
     page.appendChild(btn("pill-btn danger", "Clear history", () => {
       sfx.tap();
-      confirmBox("Clear all history?", "Every score and best will be gone.", "Clear", () => {
+      confirmBox({ title: "Clear all history?", sub: "Every score and best will be gone.", ok: "Clear", cancel: "Keep it", danger: true }, () => {
         store.history = [];
         saveStore();
         renderHistory();
-      }, "Cancel");
+      });
     }));
   }
   app.replaceChildren(page);
@@ -245,28 +260,40 @@ function saveRoundProgress() {
   try {
     localStorage.setItem(ROUND_KEY, JSON.stringify({
       levelId: round.level.id, data: round.data, values: round.values,
-      sel: round.sel, startAt: round.startAt, deadline: round.deadline,
+      sel: round.sel, fresh: round.fresh, startAt: round.startAt, deadline: round.deadline,
     }));
   } catch (e) { /* ignore */ }
 }
 function clearRoundProgress() { try { localStorage.removeItem(ROUND_KEY); } catch (e) { /* ignore */ } }
+
+// Only a blob that is exactly one of our sheets, with a sane clock, comes back.
+function validRoundBlob(s) {
+  if (!s || typeof s !== "object" || !s.data || typeof s.data !== "object" || !Array.isArray(s.values)) return null;
+  const level = F.LEVELS.find((l) => l.id === s.levelId);
+  if (!level) return null;
+  const n = level.top.length * level.side.length;
+  if (s.values.length !== n || !s.values.every((v) => typeof v === "string" && /^[0-9]{0,3}$/.test(v))) return null;
+  const sameSet = (a, b) => Array.isArray(a) && a.length === b.length &&
+    a.slice().sort((x, y) => x - y).every((v, i) => v === b[i]);
+  if (!sameSet(s.data.top, level.top) || !sameSet(s.data.side, level.side)) return null;
+  if (!Number.isFinite(s.startAt) || !Number.isFinite(s.deadline)) return null;
+  if (s.deadline - s.startAt !== F.ROUND_MS) return null;
+  if (s.deadline - Date.now() > F.ROUND_MS) return null;      // the clock went backwards: don't trust it
+  const sel = Number.isInteger(s.sel) && s.sel >= 0 && s.sel < n ? s.sel : 0;
+  return {
+    level,
+    saved: {
+      data: { levelId: level.id, op: level.op, top: s.data.top.slice(), side: s.data.side.slice() },
+      values: s.values.slice(), sel, fresh: s.fresh !== false, startAt: s.startAt, deadline: s.deadline,
+    },
+  };
+}
 function loadRoundProgress() {
-  try {
-    const raw = localStorage.getItem(ROUND_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw);
-    if (!s || typeof s !== "object" || !s.data || !Array.isArray(s.values)) return null;
-    const level = F.levelById(s.levelId);
-    if (level.id !== s.levelId) return null;
-    const n = level.top.length * level.side.length;
-    if (s.values.length !== n || !s.values.every((v) => typeof v === "string")) return null;
-    if (!Array.isArray(s.data.top) || !Array.isArray(s.data.side)) return null;
-    if (s.data.top.length !== level.top.length || s.data.side.length !== level.side.length) return null;
-    if (typeof s.startAt !== "number" || typeof s.deadline !== "number") return null;
-    if (typeof s.sel !== "number" || s.sel < 0 || s.sel >= n) s.sel = 0;
-    s.data.op = level.op;
-    return { level, saved: s };
-  } catch (e) { return null; }
+  let s = null;
+  try { const raw = localStorage.getItem(ROUND_KEY); if (raw) s = JSON.parse(raw); } catch (e) { s = null; }
+  const ok = validRoundBlob(s);
+  if (!ok && s !== null) clearRoundProgress();
+  return ok;
 }
 
 function startRound(level, saved) {
@@ -280,7 +307,8 @@ function startRound(level, saved) {
     answers,
     maxLen: F.maxDigits(answers),
     sel: saved ? saved.sel : 0,
-    fresh: true,
+    fresh: saved ? saved.fresh : true,
+    trail: [],          // squares digits were typed into, in order — ⌫ walks it back
     live: false,
     finished: false,
     startAt: saved ? saved.startAt : 0,
@@ -309,7 +337,7 @@ function renderRoundScreen() {
   const quit = btn("quit-btn", "✕", () => {
     if (!round || round.finished) return;
     sfx.tap();
-    confirmBox("Quit this round?", "It won't be counted.", "Quit", () => { clearRoundProgress(); renderHome(); });
+    confirmBox({ title: "Quit this round?", sub: "It won't be counted.", ok: "Quit", danger: true }, () => { clearRoundProgress(); renderHome(); });
   });
   quit.setAttribute("aria-label", "Quit round");
   const timer = el("div", "tb-timer", F.fmtTime(F.ROUND_MS, true));
@@ -338,7 +366,7 @@ function renderRoundScreen() {
   }
   grid.addEventListener("pointerdown", (e) => {
     const t = e.target.closest(".cell");
-    if (!t) return;
+    if (!t || e.button > 0) return;
     e.preventDefault();
     if (!round || !round.live || round.finished || modal) return;
     select(Number(t.dataset.i), true);
@@ -365,7 +393,7 @@ function renderRoundScreen() {
   }
   keys.addEventListener("pointerdown", (e) => {
     const b = e.target.closest("[data-key]");
-    if (!b) return;
+    if (!b || e.button > 0) return;
     e.preventDefault();
     b.classList.add("down");
     setTimeout(() => b.classList.remove("down"), 90);
@@ -421,8 +449,11 @@ function runCountdown() {
     ui.cdNum.classList.add("pop");
     if (s === "Go!") {
       sfx.go();
-      goLive();
-      round.countdownId = setTimeout(() => { if (ui) ui.countdown.hidden = true; }, 450);
+      round.countdownId = setTimeout(() => {
+        if (!round || round.finished || !ui) return;
+        ui.countdown.hidden = true;
+        goLive();                       // the clock starts the moment the overlay lifts
+      }, 450);
     } else {
       sfx.count();
       k++;
@@ -438,7 +469,7 @@ function goLive() {
     round.startAt = Date.now();
     round.deadline = round.startAt + F.ROUND_MS;
   }
-  select(round.sel, true);
+  select(round.sel, round.fresh);     // a resumed round keeps its half-typed square
   round.timerId = setInterval(tick, 200);
   saveRoundProgress();
   tick();
@@ -473,6 +504,7 @@ function paintSelection() {
   sideHd.forEach((h, k) => h.classList.toggle("hl", k === r));
   ui.qExpr.textContent = `${round.data.top[c]} ${round.data.op} ${round.data.side[r]}`;
   ui.qTyped.textContent = round.values[i];
+  paintHint();
 }
 
 function setValue(i, v) {
@@ -483,15 +515,25 @@ function setValue(i, v) {
   saveRoundProgress();
 }
 
+function isFull() { return round.values.every((v) => v !== ""); }
+
 function updateFilled() {
   const count = round.values.reduce((a, v) => a + (v !== "" ? 1 : 0), 0);
   ui.filledN.textContent = String(count);
   const all = count === round.values.length;
   ui.finish.classList.toggle("ready", all);
   ui.finish.textContent = all ? "Finish ✓" : "Finish";
-  ui.hint.textContent = all
-    ? "Every square is filled — tap Finish ✓ to stop the clock!"
-    : `${round.level.hint} Tap ➜ to move on.`;
+  paintHint();
+}
+
+function paintHint() {
+  const all = isFull();
+  const v = round.values[round.sel];
+  let text;
+  if (all) text = "Every square is filled — tap Finish ✓ (or ➜) to stop the clock!";
+  else if (!round.fresh && v.length && v.length < round.maxLen) text = "More digits? Keep typing. That's the whole answer? Tap ➜.";
+  else text = `${round.level.hint} Tap ➜ to move on.`;
+  ui.hint.textContent = text;
   ui.hint.classList.toggle("ready", all);
 }
 
@@ -499,7 +541,7 @@ function pressKey(k) {
   if (!round || !round.live || round.finished || modal) return;
   if (/^[0-9]$/.test(k)) typeDigit(k);
   else if (k === "back") backspace();
-  else if (k === "next") { sfx.key(); advance(); }
+  else if (k === "next") { sfx.key(); if (isFull()) onFinishTap(); else advance(); }
 }
 
 function typeDigit(d) {
@@ -508,17 +550,29 @@ function typeDigit(d) {
   if (cur.length >= round.maxLen) cur = "";   // overflow: start the square again
   const typed = cur + d;
   round.fresh = false;
+  round.trail.push(i);
+  if (round.trail.length > 400) round.trail.splice(0, 200);
   setValue(i, typed);
   sfx.key();
   if (F.shouldCommit(typed, round.answers, round.maxLen)) advance();
 }
 
+// ⌫ works like a text field: it removes the last digit typed, even when the
+// square has already moved on — so a slip that auto-advanced is one tap away.
 function backspace() {
   const i = round.sel;
   const cur = round.values[i];
   sfx.key();
-  if (cur.length) { round.fresh = false; setValue(i, cur.slice(0, -1)); }
-  else if (i > 0) select(i - 1, false);     // step back to edit, keep what's there
+  if (cur.length) { round.fresh = false; setValue(i, cur.slice(0, -1)); return; }
+  while (round.trail.length) {
+    const j = round.trail.pop();
+    if (j !== i && round.values[j].length) {
+      select(j, false);
+      setValue(j, round.values[j].slice(0, -1));
+      return;
+    }
+  }
+  if (i > 0) select(i - 1, true);           // nothing to undo: just step back
 }
 
 // Move to the next empty square after the current one (wrapping), so skipped
@@ -536,7 +590,7 @@ function moveSel(delta) {
 
 document.addEventListener("keydown", (e) => {
   if (!round || !round.live || round.finished || modal || !ui) return;
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   const k = e.key;
   if (/^[0-9]$/.test(k)) { e.preventDefault(); pressKey(k); }
   else if (k === "Backspace" || k === "Delete") { e.preventDefault(); pressKey("back"); }
@@ -553,7 +607,7 @@ function onFinishTap() {
   sfx.tap();
   const blank = round.values.filter((v) => v === "").length;
   if (blank === 0) { finishRound(false); return; }
-  confirmBox(`Finish with ${blank} blank?`, "Blank squares score nothing. The clock keeps running.", "Finish",
+  confirmBox({ title: `Finish with ${blank} blank?`, sub: "Blank squares score nothing. The clock keeps running.", ok: "Finish" },
     () => finishRound(false));
 }
 
@@ -563,7 +617,9 @@ function finishRound(timedOut) {
   round.live = false;
   if (round.timerId) { clearInterval(round.timerId); round.timerId = null; }
   closeConfirm();
-  const ms = timedOut ? F.ROUND_MS : Math.max(0, Math.min(F.ROUND_MS, Date.now() - round.startAt));
+  const elapsed = Date.now() - round.startAt;
+  if (elapsed >= F.ROUND_MS) timedOut = true;       // a Finish tap after the deadline is still "time's up"
+  const ms = timedOut ? F.ROUND_MS : Math.max(0, elapsed);
   const res = F.score(round.data, round.values);
   const prevBest = bestFor(round.level.id);
   const entry = {
@@ -571,10 +627,10 @@ function finishRound(timedOut) {
     correct: res.correct, wrong: res.wrong, blank: res.blank, ms, timedOut: !!timedOut,
   };
   store.history.push(entry);
-  if (store.history.length > HISTORY_MAX) store.history = store.history.slice(-HISTORY_MAX);
+  trimHistory();
   saveStore();
   clearRoundProgress();
-  const goal = entry.correct >= F.GOAL && !timedOut;
+  const goal = F.isGoal(entry);
   if (timedOut) sfx.buzzer(); else if (goal) sfx.goal(); else sfx.finish();
   renderResults(entry, res, prevBest, goal);
 }
@@ -649,10 +705,16 @@ muteBtn.addEventListener("click", () => {
 paintMute();
 
 // A round in progress survives the iPad killing the app: the deadline is
-// wall-clock, so we simply pick it up (or mark it, if the clock ran out).
+// wall-clock, so we pick it up with the right time left. If the clock ran out
+// while the app was closed it isn't a real attempt, so it isn't counted.
 const resume = loadRoundProgress();
-if (resume) startRound(resume.level, resume.saved);
-else renderHome();
+if (resume && resume.saved.deadline > Date.now()) {
+  startRound(resume.level, resume.saved);
+} else {
+  if (resume) clearRoundProgress();
+  renderHome();
+  if (resume) toast("Your last round ran out of time while the app was closed, so it wasn't counted.");
+}
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
