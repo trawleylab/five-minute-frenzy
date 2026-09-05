@@ -28,12 +28,14 @@ def text_centered(d, box, s, f, fill):
     d.text(((x0 + x1 - (r - l)) / 2 - l, (y0 + y1 - (b - t)) / 2 - t), s, font=f, fill=fill)
 
 
-def make(size, maskable=False):
-    # draw at 4x and downsample for smooth edges
+def make(size, maskable=False, opaque=False):
+    # draw at 4x and downsample for smooth edges. `opaque` = square corners and
+    # no alpha: iOS masks the home-screen icon itself and paints any
+    # transparency black.
     S = size * 4
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    radius = 0 if maskable else S * 0.22
+    radius = 0 if (maskable or opaque) else S * 0.22
     # full-bleed layers first; the rounded corners are cut with a mask at the end
     d.rectangle([0, 0, S - 1, S - 1], fill=ORANGE)
     d.rectangle([0, S * 0.62, S - 1, S - 1], fill=ORANGE_DARK)   # darker band for depth
@@ -73,11 +75,12 @@ def make(size, maskable=False):
     mask = Image.new("L", (S, S), 0)
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, S - 1, S - 1], radius=radius, fill=255)
     img.putalpha(mask)
-    return img.resize((size, size), Image.LANCZOS)
+    out = img.resize((size, size), Image.LANCZOS)
+    return out.convert("RGB") if opaque else out
 
 
 make(512).save(os.path.join(HERE, "icon-512.png"))
 make(192).save(os.path.join(HERE, "icon-192.png"))
-make(180).save(os.path.join(HERE, "icon-180.png"))
+make(180, opaque=True).save(os.path.join(HERE, "icon-180.png"))   # apple-touch-icon
 make(512, maskable=True).save(os.path.join(HERE, "icon-maskable-512.png"))
 print("icons written")

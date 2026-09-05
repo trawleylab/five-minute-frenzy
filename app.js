@@ -14,6 +14,10 @@ const fxLayer = document.getElementById("fx-layer");
 const STORE_KEY = "frenzy.v1";
 const ROUND_KEY = "frenzy.round";
 const HISTORY_MAX = 1000;
+// A time-out noticed more than this long after the deadline means the round
+// wasn't being played when the clock ran out (iPad locked, app suspended or
+// killed) — that's not an attempt, so it isn't scored.
+const ABANDON_MS = 60 * 1000;
 
 function validEntry(h) {
   return !!h && typeof h === "object" && typeof h.level === "string" && typeof h.when === "string" &&
@@ -590,8 +594,9 @@ function moveSel(delta) {
 
 document.addEventListener("keydown", (e) => {
   if (!round || !round.live || round.finished || modal || !ui) return;
-  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key;
+  if (e.repeat && k.indexOf("Arrow") !== 0) return;   // a held key must not flood squares
   if (/^[0-9]$/.test(k)) { e.preventDefault(); pressKey(k); }
   else if (k === "Backspace" || k === "Delete") { e.preventDefault(); pressKey("back"); }
   else if (k === "Enter" || k === "Tab" || k === " ") { e.preventDefault(); pressKey("next"); }
@@ -611,13 +616,21 @@ function onFinishTap() {
     () => finishRound(false));
 }
 
+function abandonRound() {
+  clearRoundProgress();
+  renderHome();
+  toast("That round ran out of time while the app was away, so it wasn't counted.");
+}
+
 function finishRound(timedOut) {
   if (!round || round.finished) return;
+  const now = Date.now();
+  if (timedOut && now - round.deadline > ABANDON_MS) { abandonRound(); return; }
   round.finished = true;
   round.live = false;
   if (round.timerId) { clearInterval(round.timerId); round.timerId = null; }
   closeConfirm();
-  const elapsed = Date.now() - round.startAt;
+  const elapsed = now - round.startAt;
   if (elapsed >= F.ROUND_MS) timedOut = true;       // a Finish tap after the deadline is still "time's up"
   const ms = timedOut ? F.ROUND_MS : Math.max(0, elapsed);
   const res = F.score(round.data, round.values);
@@ -708,8 +721,8 @@ paintMute();
 // wall-clock, so we pick it up with the right time left. If the clock ran out
 // while the app was closed it isn't a real attempt, so it isn't counted.
 const resume = loadRoundProgress();
-if (resume && resume.saved.deadline > Date.now()) {
-  startRound(resume.level, resume.saved);
+if (resume && Date.now() - resume.saved.deadline <= ABANDON_MS) {
+  startRound(resume.level, resume.saved);     // time left → carry on; just expired → scored as time's up
 } else {
   if (resume) clearRoundProgress();
   renderHome();
