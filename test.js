@@ -9,21 +9,86 @@ function test(name, fn) { fn(); n++; console.log("  ✓ " + name); }
 // deterministic rng for reproducible shuffles
 function lcg(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
-test("three levels, 10 x 10 each", () => {
-  assert.strictEqual(F.LEVELS.length, 3);
-  for (const l of F.LEVELS) { assert.strictEqual(l.top.length, 10); assert.strictEqual(l.side.length, 10); }
+test("four levels, every sheet 10 x 10", () => {
+  assert.strictEqual(F.LEVELS.length, 4);
+  for (const l of F.LEVELS) {
+    assert.strictEqual(F.headerCount(l, "top"), 10);
+    assert.strictEqual(F.headerCount(l, "side"), 10);
+    assert.strictEqual(F.cellCount(l), 100);
+  }
   assert.deepStrictEqual(F.levelById("add").top, [0,1,2,3,4,5,6,7,8,9]);
   assert.deepStrictEqual(F.levelById("sub").top, [9,10,11,12,13,14,15,16,17,18]);
   assert.deepStrictEqual(F.levelById("sub").side, [0,1,2,3,4,5,6,7,8,9]);
   assert.strictEqual(F.levelById("nope").id, "add", "unknown id falls back to the classic sheet");
+  const ids = F.LEVELS.map((l) => l.id);
+  assert.deepStrictEqual(ids, ["add", "addbig", "sub", "mult"]);
+  assert.strictEqual(F.LEVELS.filter((l) => l.untimed).length, 1, "only the times-table sheet is untimed");
 });
 
-test("a round shuffles headers as permutations; every pair appears exactly once", () => {
+test("the times-table sheet draws ten of thirteen headers, 0 to 12, no repeats", () => {
+  const m = F.levelById("mult");
+  assert.strictEqual(m.op, "×");
+  assert.strictEqual(m.untimed, true);
+  assert.strictEqual(m.pick, 10);
+  assert.deepStrictEqual(F.headerPool(m, "top"), [0,1,2,3,4,5,6,7,8,9,10,11,12]);
+  const seenTop = new Set(), seenSide = new Set();
+  // one continuous stream, not a fresh seed per sheet: reseeding this toy LCG
+  // with consecutive small seeds correlates the first draw and skips values.
+  const rng = lcg(20260919);
+  for (let sheet = 0; sheet < 60; sheet++) {
+    const r = F.makeRound(m, rng);
+    for (const axis of [r.top, r.side]) {
+      assert.strictEqual(axis.length, 10);
+      assert.strictEqual(new Set(axis).size, 10, "no duplicate columns or rows");
+      assert.ok(axis.every((v) => Number.isInteger(v) && v >= 0 && v <= 12));
+    }
+    r.top.forEach((v) => seenTop.add(v));
+    r.side.forEach((v) => seenSide.add(v));
+    // every pair on the sheet is still unique, like the printed one
+    const pairs = new Set();
+    for (let i = 0; i < 10; i++) for (let j = 0; j < 10; j++) pairs.add(r.top[j] + "," + r.side[i]);
+    assert.strictEqual(pairs.size, 100);
+  }
+  assert.strictEqual(seenTop.size, 13, "over many sheets every table from 0 to 12 turns up");
+  assert.strictEqual(seenSide.size, 13);
+});
+
+test("multiplication answers are products; 0 and 144 are the extremes", () => {
+  const r = { op: "×", top: [0, 7, 12], side: [5, 9, 12] };
+  assert.strictEqual(F.answerAt(r, 0, 0), 0);    // 0 × 5
+  assert.strictEqual(F.answerAt(r, 1, 1), 63);   // 7 × 9
+  assert.strictEqual(F.answerAt(r, 2, 2), 144);  // 12 × 12
+  const a = F.possibleAnswers(F.levelById("mult"));
+  assert.strictEqual(a[0], 0);
+  assert.strictEqual(a[a.length - 1], 144);
+  assert.strictEqual(F.maxDigits(a), 3);
+  assert.ok(a.indexOf(13) === -1, "13 is not a product of two numbers 0-12");
+  assert.ok(a.indexOf(77) !== -1);
+});
+
+test("validHeaders vets a saved sheet against its level", () => {
+  const m = F.levelById("mult"), add = F.levelById("add");
+  assert.strictEqual(F.validHeaders(m, [0,1,2,3,4,5,6,7,8,9], "top"), true);
+  assert.strictEqual(F.validHeaders(m, [3,4,5,6,7,8,9,10,11,12], "top"), true);
+  assert.strictEqual(F.validHeaders(m, [0,1,2,3,4,5,6,7,8], "top"), false, "too few");
+  assert.strictEqual(F.validHeaders(m, [0,1,2,3,4,5,6,7,8,8], "top"), false, "a repeat");
+  assert.strictEqual(F.validHeaders(m, [0,1,2,3,4,5,6,7,8,13], "top"), false, "13 is off the pool");
+  assert.strictEqual(F.validHeaders(add, [9,8,7,6,5,4,3,2,1,0], "top"), true, "any permutation");
+  assert.strictEqual(F.validHeaders(add, [0,1,2,3,4,5,6,7,8,10], "top"), false, "10 is off the classic sheet");
+  assert.strictEqual(F.validHeaders(add, "nope", "top"), false);
+});
+
+test("every sheet draws legal headers; every pair appears exactly once", () => {
+  const rng = lcg(4242);
   for (const l of F.LEVELS) {
-    for (let seed = 1; seed <= 20; seed++) {
-      const r = F.makeRound(l, lcg(seed));
-      assert.deepStrictEqual(r.top.slice().sort((a, b) => a - b), l.top);
-      assert.deepStrictEqual(r.side.slice().sort((a, b) => a - b), l.side);
+    for (let sheet = 0; sheet < 20; sheet++) {
+      const r = F.makeRound(l, rng);
+      assert.ok(F.validHeaders(l, r.top, "top"), l.id + " top");
+      assert.ok(F.validHeaders(l, r.side, "side"), l.id + " side");
+      if (!l.pick) {
+        assert.deepStrictEqual(r.top.slice().sort((a, b) => a - b), l.top, "a full-pool sheet is a permutation");
+        assert.deepStrictEqual(r.side.slice().sort((a, b) => a - b), l.side);
+      }
       const seen = new Set();
       for (let i = 0; i < 10; i++) for (let j = 0; j < 10; j++) seen.add(r.top[j] + "," + r.side[i]);
       assert.strictEqual(seen.size, 100);
@@ -59,6 +124,22 @@ test("possible answers and digit lengths per level", () => {
   const sub = F.possibleAnswers(F.levelById("sub"));
   assert.deepStrictEqual(sub, Array.from({ length: 19 }, (_, i) => i));
   assert.ok(sub.every((a) => a >= 0), "no negative differences on the subtracting sheet");
+});
+
+test("auto-advance on the times-table sheet: only 0 commits alone, ➜ does the rest", () => {
+  const a = F.possibleAnswers(F.levelById("mult"));
+  assert.strictEqual(F.shouldCommit("0", a, 3), true, "nothing starts with 0 except 0");
+  for (const d of "123456789") {
+    assert.strictEqual(F.shouldCommit(d, a, 3), false, `${d} could still grow (e.g. ${d}0)`);
+  }
+  for (const n of [10, 11, 12, 14]) {
+    assert.strictEqual(F.shouldCommit(String(n), a, 3), false, `${n} could still grow into a hundred`);
+  }
+  for (const n of [15, 16, 18, 20, 63, 99]) {
+    assert.strictEqual(F.shouldCommit(String(n), a, 3), true, `nothing longer starts with ${n}`);
+  }
+  assert.strictEqual(F.shouldCommit("144", a, 3), true, "three digits is as long as it gets");
+  assert.strictEqual(F.shouldCommit("13", a, 3), false, "13 is no product, so wait for a ⌫ rather than commit it");
 });
 
 test("auto-advance: commit when nothing longer is possible", () => {

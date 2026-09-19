@@ -37,6 +37,20 @@
       top: range(9, 18),
       side: range(0, 9),
     },
+    {
+      id: "mult",
+      op: "×",
+      emoji: "✖️",
+      name: "Multiplying Frenzy",
+      sub: "0 to 12 · no clock",
+      hint: "Top number times side number.",
+      // 13 possible headers, 10 columns: each sheet draws a different ten, so
+      // the tables that appear change every time.
+      top: range(0, 12),
+      side: range(0, 12),
+      pick: 10,
+      untimed: true,
+    },
   ];
 
   const ROUND_MS = 5 * 60 * 1000;
@@ -44,7 +58,11 @@
 
   function levelById(id) { return LEVELS.find((l) => l.id === id) || LEVELS[0]; }
 
-  function compute(op, top, side) { return op === "+" ? top + side : top - side; }
+  function compute(op, top, side) {
+    if (op === "+") return top + side;
+    if (op === "×") return top * side;
+    return top - side;
+  }
 
   // Fisher–Yates with an injectable rng (Math.random by default)
   function shuffle(arr, rng) {
@@ -57,14 +75,39 @@
     return a;
   }
 
-  // One sheet: shuffled column headers (top) and row headers (side).
+  // A level's headers come from a pool. Most levels use the whole pool (ten of
+  // ten, so the sheet is a permutation); a level with `pick` draws that many of
+  // them at random, without repeats, so no column is a duplicate of another.
+  function headerPool(level, axis) { return axis === "top" ? level.top : level.side; }
+  function headerCount(level, axis) { return level.pick || headerPool(level, axis).length; }
+  function cellCount(level) { return headerCount(level, "top") * headerCount(level, "side"); }
+
+  function pickHeaders(level, axis, rng) {
+    const drawn = shuffle(headerPool(level, axis), rng);
+    return level.pick ? drawn.slice(0, level.pick) : drawn;
+  }
+
+  // Are these headers a legitimate draw for this level? (Right count, all from
+  // the pool, no repeats.) Used to vet a saved round before resuming it.
+  function validHeaders(level, arr, axis) {
+    const pool = headerPool(level, axis);
+    if (!Array.isArray(arr) || arr.length !== headerCount(level, axis)) return false;
+    const seen = new Set();
+    for (const v of arr) {
+      if (!Number.isInteger(v) || pool.indexOf(v) === -1 || seen.has(v)) return false;
+      seen.add(v);
+    }
+    return true;
+  }
+
+  // One sheet: column headers across the top, row headers down the side.
   // Every top/side pair appears exactly once, like the printed sheet.
   function makeRound(level, rng) {
     return {
       levelId: level.id,
       op: level.op,
-      top: shuffle(level.top, rng),
-      side: shuffle(level.side, rng),
+      top: pickHeaders(level, "top", rng),
+      side: pickHeaders(level, "side", rng),
     };
   }
 
@@ -122,6 +165,7 @@
   }
 
   // The sheet's own goal: 98 or better, and the clock didn't beat you.
+  // An untimed sheet records timedOut false, so it only has to reach 98.
   function isGoal(h) { return !!h && h.correct >= GOAL && !h.timedOut; }
 
   // Is result a better than result b? Reaching the goal beats not reaching it;
@@ -137,6 +181,7 @@
   const api = {
     LEVELS, ROUND_MS, GOAL,
     levelById, shuffle, makeRound, answerAt, possibleAnswers, maxDigits,
+    headerPool, headerCount, cellCount, pickHeaders, validHeaders,
     shouldCommit, nextEmpty, score, fmtTime, betterThan, isGoal,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

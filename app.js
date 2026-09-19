@@ -275,14 +275,16 @@ function validRoundBlob(s) {
   if (!s || typeof s !== "object" || !s.data || typeof s.data !== "object" || !Array.isArray(s.values)) return null;
   const level = F.LEVELS.find((l) => l.id === s.levelId);
   if (!level) return null;
-  const n = level.top.length * level.side.length;
+  const n = F.cellCount(level);
   if (s.values.length !== n || !s.values.every((v) => typeof v === "string" && /^[0-9]{0,3}$/.test(v))) return null;
-  const sameSet = (a, b) => Array.isArray(a) && a.length === b.length &&
-    a.slice().sort((x, y) => x - y).every((v, i) => v === b[i]);
-  if (!sameSet(s.data.top, level.top) || !sameSet(s.data.side, level.side)) return null;
+  if (!F.validHeaders(level, s.data.top, "top") || !F.validHeaders(level, s.data.side, "side")) return null;
   if (!Number.isFinite(s.startAt) || !Number.isFinite(s.deadline)) return null;
-  if (s.deadline - s.startAt !== F.ROUND_MS) return null;
-  if (s.deadline - Date.now() > F.ROUND_MS) return null;      // the clock went backwards: don't trust it
+  if (level.untimed) {
+    if (s.deadline !== 0 || s.startAt > Date.now()) return null;
+  } else {
+    if (s.deadline - s.startAt !== F.ROUND_MS) return null;
+    if (s.deadline - Date.now() > F.ROUND_MS) return null;    // the clock went backwards: don't trust it
+  }
   const sel = Number.isInteger(s.sel) && s.sel >= 0 && s.sel < n ? s.sel : 0;
   return {
     level,
@@ -303,7 +305,7 @@ function loadRoundProgress() {
 function startRound(level, saved) {
   stopRound();
   const answers = F.possibleAnswers(level);
-  const n = level.top.length * level.side.length;
+  const n = F.cellCount(level);
   round = {
     level,
     data: saved ? saved.data : F.makeRound(level),
@@ -324,7 +326,13 @@ function startRound(level, saved) {
   renderRoundScreen();
   if (saved) {
     goLive();
-    if (round && !round.finished) toast(`Picked up where you left off · ${F.fmtTime(round.deadline - Date.now(), true)} left`);
+    if (round && !round.finished) {
+      toast(level.untimed
+        ? "Picked up where you left off."
+        : `Picked up where you left off · ${F.fmtTime(round.deadline - Date.now(), true)} left`);
+    }
+  } else if (level.untimed) {
+    goLive();                         // no clock, so no 3·2·1 — just start
   } else {
     runCountdown();
   }
@@ -344,7 +352,9 @@ function renderRoundScreen() {
     confirmBox({ title: "Quit this round?", sub: "It won't be counted.", ok: "Quit", danger: true }, () => { clearRoundProgress(); renderHome(); });
   });
   quit.setAttribute("aria-label", "Quit round");
-  const timer = el("div", "tb-timer", F.fmtTime(F.ROUND_MS, true));
+  const timer = level.untimed
+    ? el("div", "tb-noclock", "No clock ✨")
+    : el("div", "tb-timer", F.fmtTime(F.ROUND_MS, true));
   const filled = el("div", "tb-filled");
   const filledN = el("b", null, "0");
   filled.append(filledN, ` / ${n * m}`);
@@ -354,7 +364,7 @@ function renderRoundScreen() {
   // the grid
   const arena = el("div", "arena");
   const wrap = el("div", "grid-wrap");
-  const grid = el("div", "grid");
+  const grid = el("div", "grid" + (round.maxLen >= 3 ? " wide" : ""));
   const cells = [], topHd = [], sideHd = [];
   grid.appendChild(el("div", "hd corner", level.op));
   for (let c = 0; c < m; c++) { const h = el("div", "hd top", String(data.top[c])); topHd.push(h); grid.appendChild(h); }
@@ -403,6 +413,7 @@ function renderRoundScreen() {
     setTimeout(() => b.classList.remove("down"), 90);
     pressKey(b.dataset.key);
   });
+  const nextKey = keys.querySelector('[data-key="next"]');
   const hint = el("div", "pad-hint", `${level.hint} Tap ➜ to move on.`);
   pad.append(q, keys, hint);
 
@@ -417,7 +428,7 @@ function renderRoundScreen() {
   play.append(top, arena, countdown);
   app.replaceChildren(play);
 
-  ui = { play, timer, filledN, finish, grid, wrap, cells, topHd, sideHd, qExpr, qTyped, hint, countdown, cdNum, n, m };
+  ui = { play, timer, filledN, finish, grid, wrap, cells, topHd, sideHd, qExpr, qTyped, hint, nextKey, countdown, cdNum, n, m };
   fitGrid();
   // belt and braces: the observer catches layout changes, the window events
   // catch rotations and viewport changes that some engines don't observe
@@ -471,16 +482,18 @@ function goLive() {
   round.live = true;
   if (!round.startAt) {
     round.startAt = Date.now();
-    round.deadline = round.startAt + F.ROUND_MS;
+    round.deadline = round.level.untimed ? 0 : round.startAt + F.ROUND_MS;
   }
   select(round.sel, round.fresh);     // a resumed round keeps its half-typed square
-  round.timerId = setInterval(tick, 200);
   saveRoundProgress();
+  if (round.level.untimed) return;    // elapsed time is still recorded, just never shown
+  round.timerId = setInterval(tick, 200);
   tick();
 }
 
 function tick() {
   if (!round || !round.live || round.finished || !ui) return;
+  if (round.level.untimed) return;
   const rem = round.deadline - Date.now();
   ui.timer.textContent = F.fmtTime(rem, true);
   const secLeft = Math.ceil(rem / 1000);
@@ -533,12 +546,18 @@ function updateFilled() {
 function paintHint() {
   const all = isFull();
   const v = round.values[round.sel];
+  const waiting = !all && !round.fresh && v.length > 0 && v.length < round.maxLen;
   let text;
-  if (all) text = "Every square is filled — tap Finish ✓ (or ➜) to stop the clock!";
-  else if (!round.fresh && v.length && v.length < round.maxLen) text = "More digits? Keep typing. That's the whole answer? Tap ➜.";
+  if (all) text = round.level.untimed
+    ? "Every square is filled — tap Finish ✓ (or ➜) to see how you did!"
+    : "Every square is filled — tap Finish ✓ (or ➜) to stop the clock!";
+  else if (waiting) text = "More digits? Keep typing. That's the whole answer? Tap ➜.";
   else text = `${round.level.hint} Tap ➜ to move on.`;
   ui.hint.textContent = text;
   ui.hint.classList.toggle("ready", all);
+  // ➜ glows while an entry sits there waiting. It glows for ANY complete-looking
+  // entry, right or wrong, so it never hints at the answer.
+  if (ui.nextKey) ui.nextKey.classList.toggle("ready", waiting);
 }
 
 function pressKey(k) {
@@ -612,8 +631,11 @@ function onFinishTap() {
   sfx.tap();
   const blank = round.values.filter((v) => v === "").length;
   if (blank === 0) { finishRound(false); return; }
-  confirmBox({ title: `Finish with ${blank} blank?`, sub: "Blank squares score nothing. The clock keeps running.", ok: "Finish" },
-    () => finishRound(false));
+  confirmBox({
+    title: `Finish with ${blank} blank?`,
+    sub: round.level.untimed ? "Blank squares score nothing — there's no rush." : "Blank squares score nothing. The clock keeps running.",
+    ok: "Finish",
+  }, () => finishRound(false));
 }
 
 function abandonRound() {
@@ -631,7 +653,8 @@ function finishRound(timedOut) {
   if (round.timerId) { clearInterval(round.timerId); round.timerId = null; }
   closeConfirm();
   const elapsed = now - round.startAt;
-  if (elapsed >= F.ROUND_MS) timedOut = true;       // a Finish tap after the deadline is still "time's up"
+  if (round.level.untimed) timedOut = false;
+  else if (elapsed >= F.ROUND_MS) timedOut = true;  // a Finish tap after the deadline is still "time's up"
   const ms = timedOut ? F.ROUND_MS : Math.max(0, elapsed);
   const res = F.score(round.data, round.values);
   const prevBest = bestFor(round.level.id);
@@ -663,11 +686,13 @@ function renderResults(entry, res, prevBest, goal) {
   card.appendChild(big);
   card.appendChild(el("div", "score-line",
     `⏱ ${entry.timedOut ? "Time's up" : F.fmtTime(entry.ms)}   ✅ ${entry.correct}   ❌ ${entry.wrong}   ⬜ ${entry.blank}`));
+  const untimed = !!level.untimed;
   let verdict;
-  if (goal) verdict = "🔥 Frenzy Master! 98 or better in under five minutes.";
+  if (goal) verdict = untimed ? "🔥 Frenzy Master! 98 or better — brilliant." : "🔥 Frenzy Master! 98 or better in under five minutes.";
   else if (entry.timedOut && entry.correct >= F.GOAL) verdict = "So close! 98+ — now beat the clock.";
-  else if (!prevBest) verdict = "First round done. The goal is 98 in under 5:00.";
+  else if (!prevBest) verdict = untimed ? "First sheet done. The goal is 98 out of 100." : "First round done. The goal is 98 in under 5:00.";
   else if (isBest) verdict = "⭐ New best for this level!";
+  else if (untimed) verdict = `Goal: 98 out of 100 · your best is ${prevBest.correct}`;
   else verdict = `Goal: 98 in under 5:00 · your best is ${prevBest.correct} in ${prevBest.timedOut ? "5:00" : F.fmtTime(prevBest.ms)}`;
   card.appendChild(el("div", "verdict", verdict));
   side.appendChild(card);
@@ -682,7 +707,8 @@ function renderResults(entry, res, prevBest, goal) {
 
   // the marked sheet
   const wrap = el("div", "review-wrap");
-  const grid = el("div", "grid review");
+  const wide = F.maxDigits(F.possibleAnswers(level)) >= 3;
+  const grid = el("div", "grid review" + (wide ? " wide" : ""));
   grid.appendChild(el("div", "hd corner", data.op));
   for (let c = 0; c < m; c++) grid.appendChild(el("div", "hd top", String(data.top[c])));
   for (let r = 0; r < n; r++) {
@@ -721,7 +747,7 @@ paintMute();
 // wall-clock, so we pick it up with the right time left. If the clock ran out
 // while the app was closed it isn't a real attempt, so it isn't counted.
 const resume = loadRoundProgress();
-if (resume && Date.now() - resume.saved.deadline <= ABANDON_MS) {
+if (resume && (resume.level.untimed || Date.now() - resume.saved.deadline <= ABANDON_MS)) {
   startRound(resume.level, resume.saved);     // time left → carry on; just expired → scored as time's up
 } else {
   if (resume) clearRoundProgress();

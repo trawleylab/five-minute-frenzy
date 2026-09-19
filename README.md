@@ -9,23 +9,33 @@ Goal: 98 out of 100 in under five minutes.
 
 A ScupperLab production — Henry's adding and subtracting speed trainer.
 
-## The three sheets
+## The four sheets
 
 - **➕ Adding Frenzy** — 0 to 9 across and down, sums 0–18. The classic sheet.
 - **💪 Adding Frenzy · Big** — 5 to 14, sums 10–28. The push.
 - **➖ Subtracting Frenzy** — 9 to 18 across the top, 0 to 9 down the side;
   top number take away side number, differences 0–18.
+- **✖️ Multiplying Frenzy** — the times tables, **and the only sheet with no
+  clock**. Each sheet draws ten of the thirteen numbers 0 to 12 for the top
+  and another ten for the side, so the tables on offer change every time and
+  products run from 0 to 144.
 
 Every top/side pair appears exactly once per sheet, just like the paper.
 
 ## How a round works
 
 1. Tap a sheet → 3 · 2 · 1 · Go! The clock starts and the first square glows.
+   (The times-table sheet skips the countdown and shows **No clock ✨** where
+   the timer would be. Its time is still recorded and shown at the end, but
+   never while he's working.)
 2. Type the answer on the big keypad. A square moves on **by itself** the
    moment what you've typed is a possible answer that can't grow into a
    longer one (2–9 commit instantly on the classic sheet; 1 waits for a
-   second digit or ➜). ⌫ removes the last digit you typed, even if the
-   square has already moved on — so a slip is one tap away.
+   second digit or ➜). On the times-table sheet almost everything waits,
+   because 3 could still become 36 — so ➜ glows whenever an entry is sitting
+   ready to commit. It glows for any complete-looking number, right or wrong,
+   so it never hints at the answer. ⌫ removes the last digit you typed, even
+   if the square has already moved on — so a slip is one tap away.
 3. Tap any square to jump to it; ➜ skips a square (it comes round again at
    the end). Physical keyboard works too: digits, Backspace, Enter/Tab/Space
    for next, arrows to move.

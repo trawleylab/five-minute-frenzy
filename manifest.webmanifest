@@ -1,7 +1,7 @@
 {
   "name": "Five Minute Frenzy",
   "short_name": "Frenzy",
-  "description": "Henry's timed adding and subtracting grid: 100 squares, five minutes, goal 98.",
+  "description": "Henry's adding, subtracting and times-table grids: 100 squares, five minutes, goal 98 — plus an untimed multiplication sheet.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

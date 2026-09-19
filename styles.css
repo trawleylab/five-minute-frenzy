@@ -78,7 +78,8 @@ button {
 }
 .tagline { font-size: clamp(15px, 2.2vw, 19px); opacity: 0.8; margin-top: -8px; text-align: center; max-width: 640px; }
 
-.mode-row { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+/* four sheets: keep them in a tidy 2 x 2 rather than an accidental 3 + 1 */
+.mode-row { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 540px; }
 .mode-btn {
   width: min(250px, 44vw);
   padding: 18px 12px 14px;
@@ -142,6 +143,12 @@ button {
   padding: 2px 16px; min-width: 4.4ch; text-align: center;
 }
 .tb-timer.urgent { color: var(--bad); animation: pulse 1s infinite; }
+.tb-noclock {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.6); border-radius: 14px;
+  padding: 8px 16px; white-space: nowrap; font-weight: bold;
+  color: var(--muted);
+}
 .tb-filled { background: rgba(255, 255, 255, 0.6); border-radius: 12px; padding: 6px 12px; white-space: nowrap; }
 .tb-filled b { color: var(--accent); }
 .finish-btn {
@@ -178,6 +185,8 @@ button {
   line-height: 1;
   min-width: 0; min-height: 0;
 }
+/* three-digit answers (the times-table sheet) need a smaller number */
+.grid.wide .cell { font-size: calc(var(--cell) * 0.4); }
 .grid .hd { background: var(--hd); }
 .grid .hd.corner { background: var(--ink); color: #fff; }
 .grid .hd.hl { background: var(--accent-soft); color: var(--accent-dark); }
@@ -216,6 +225,7 @@ button {
 .key.down, .key:active { transform: translateY(3px); box-shadow: var(--shadow-down); background: var(--sel-bg); }
 .key-back { color: var(--muted); }
 .key-next { background: var(--accent); color: #fff; }
+.key-next.ready { box-shadow: var(--shadow), 0 0 0 4px var(--accent-soft); animation: pulse 1.1s infinite; }
 .key-next.down, .key-next:active { background: var(--accent-dark); }
 .pad-hint { font-size: clamp(12px, 1.6vw, 15px); opacity: 0.65; text-align: center; min-height: 2.4em; }
 .pad-hint.ready { opacity: 1; color: var(--accent-dark); font-weight: bold; }
